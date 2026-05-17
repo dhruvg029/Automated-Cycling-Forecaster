@@ -39,15 +39,24 @@ def load_raw_data(
     table: str = DEFAULT_TABLE,
 ) -> pd.DataFrame:
     """Load cycling counts from SQLite (step2_LightGBM.ipynb)."""
+
+    query = f"""
+    SELECT *
+    FROM "{table}"
+    WHERE Start_Time >= datetime('now', '-3 years');
+    """
+
     with sqlite3.connect(Path(db_path)) as conn:
-        return pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+        return pd.read_sql_query(query, conn)
 
 
 def load_and_prepare_daily(
     db_path: str | Path = DEFAULT_DB_PATH,
     table: str = DEFAULT_TABLE,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+
     """Load raw counts, aggregate to daily per site, add features and lags."""
+    
     df = load_raw_data(db_path, table)
     df["Start_Time"] = pd.to_datetime(df["Start_Time"])
     df["End_Time"] = pd.to_datetime(df["End_Time"])
@@ -207,9 +216,9 @@ def run_pipeline(
     forecast_end: str = "2025-11-16",
     train_years: int = 2,
 ) -> dict:
-    """
-    Full 2Y pipeline: load → features → split → fit → recursive forecast → eval_df_2Y.
-    """
+
+    """Full 2Y pipeline: load → features → split → fit → recursive forecast → eval_df_2Y."""
+
     df_daily, df_model = load_and_prepare_daily(db_path, table)
     train_2y, test_actual_2y = split_train_test(
         df_model,
