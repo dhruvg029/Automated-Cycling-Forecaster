@@ -14,6 +14,10 @@ import pandas as pd
 from lightgbm import LGBMRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+## Dhruv => Added MLflow imports
+import mlflow
+import mlflow.lightgbm
+
 FEATURES = [
     "Site_ID",
     "dayofweek",
@@ -109,18 +113,14 @@ def split_train_test(
     ].copy()
     return train, test_actual
 
-
-def fit_lgbm_2y(train_2y: pd.DataFrame) -> LGBMRegressor:
+## Dhruv => added model_params argument for MLFlow
+def fit_lgbm_2y(train_2y: pd.DataFrame, model_params: dict) -> LGBMRegressor:
     train_2y = train_2y.copy()
     train_2y["Site_ID"] = train_2y["Site_ID"].astype("category")
 
-    model = LGBMRegressor(
-        n_estimators=500,
-        learning_rate=0.05,
-        max_depth=-1,
-        num_leaves=31,
-        random_state=42,
-    )
+    ## Dhruv => Model parameters defined here
+    model = LGBMRegressor(**model_params)
+
     model.fit(
         train_2y[FEATURES],
         train_2y[TARGET],
@@ -206,8 +206,8 @@ def predict_and_evaluate(
     print("Recursive LightGBM MAE:", mae)
     print("Recursive LightGBM RMSE:", rmse)
 
-    return eval_df
-
+    ## Dhruv => Added more metrics here for MLflow to track
+    return eval_df, mae, rmse
 
 def run_pipeline(
     db_path: str | Path = DEFAULT_DB_PATH,
@@ -219,6 +219,18 @@ def run_pipeline(
 
     """Full 2Y pipeline: load → features → split → fit → recursive forecast → eval_df_2Y."""
 
+    ## Dhruv => Setting experiment name
+    mlflow.set_experiment("Forecasting Experiment")
+
+    ## Dhruv => Added model parameters here instead
+    lgbm_params = {
+        "n_estimators": 500,
+        "learning_rate": 0.05,
+        "max_depth": -1,
+        "num_leaves": 31,
+        "random_state": 42,
+    }
+
     df_daily, df_model = load_and_prepare_daily(db_path, table)
     train_2y, test_actual_2y = split_train_test(
         df_model,
@@ -226,14 +238,34 @@ def run_pipeline(
         forecast_end=forecast_end,
         years=train_years,
     )
-    lgbm_model_2y = fit_lgbm_2y(train_2y)
-    eval_df_2y = predict_and_evaluate(
-        lgbm_model_2y,
-        test_actual_2y,
-        df_daily,
-        cutoff=cutoff,
-        forecast_end=forecast_end,
-    )
+
+    ## Dhruv => Starting MLflow run here
+    with mlflow.start_run(run_name = "Dhruv_Testing_1"):
+
+        ## Dhruv => Logging the parameters and config
+        mlflow.log_params(lgbm_params)
+        mlflow.log_param("train_years", train_years)
+        mlflow.log_param("cutoff_date", cutoff)
+
+        lgbm_model_2y = fit_lgbm_2y(train_2y, lgbm_params)
+        
+        ## Updated here the function
+        eval_df_2y, mae, rmse= predict_and_evaluate(
+            lgbm_model_2y,
+            test_actual_2y,
+            df_daily,
+            cutoff = cutoff,
+            forecast_end = forecast_end,
+        )
+
+        ## Dhruv => Logging the final metrics
+        mlflow.log_metric("Mean_Absolute_Error", mae)
+        mlflow.log_metric("Root_Mean_Squared_Error", rmse)
+        
+        ## Dhruv => Saving the actual model artifact to MLflow
+        ## Dhruv => This is what docker will pull later to serve the predictions
+        mlflow.lightgbm.log_model(lgbm_model_2y, "model")
+
     return {
         "df_daily": df_daily,
         "df_model": df_model,
