@@ -41,15 +41,23 @@ DEFAULT_TABLE = "traffic_counts"
 def load_raw_data(
     db_path: str | Path = DEFAULT_DB_PATH,
     table: str = DEFAULT_TABLE,
+    cutoff: str | pd.Timestamp = "2025-05-16",
+    forecast_end: str | pd.Timestamp = "2025-11-16",
+    days: int = 365*2,
 ) -> pd.DataFrame:
     """Load cycling counts from SQLite (step2_LightGBM.ipynb)."""
+
+    start_time = (pd.Timestamp(cutoff) - pd.Timedelta(days=days)).strftime("%Y-%m-%d") + " 00:00:00"
+    end_time = pd.Timestamp(forecast_end).strftime("%Y-%m-%d") + " 23:59:59"
 
     query = f"""
     SELECT *
     FROM "{table}"
-    WHERE Start_Time >= datetime('now', '-3 years');
+    WHERE Start_Time >= "{start_time}"
+    AND End_Time <= "{end_time}";
     """
 
+    print(f"query: {query}")
     with sqlite3.connect(Path(db_path)) as conn:
         return pd.read_sql_query(query, conn)
 
@@ -57,11 +65,14 @@ def load_raw_data(
 def load_and_prepare_daily(
     db_path: str | Path = DEFAULT_DB_PATH,
     table: str = DEFAULT_TABLE,
+    cutoff: str | pd.Timestamp = "2025-05-16",
+    forecast_end: str | pd.Timestamp = "2025-11-16",
+    days: int = 365*2,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     """Load raw counts, aggregate to daily per site, add features and lags."""
     
-    df = load_raw_data(db_path, table)
+    df = load_raw_data(db_path, table, cutoff, forecast_end, days)
     df["Start_Time"] = pd.to_datetime(df["Start_Time"])
     df["End_Time"] = pd.to_datetime(df["End_Time"])
 
@@ -99,11 +110,11 @@ def split_train_test(
     df: pd.DataFrame,
     cutoff: str | pd.Timestamp = "2025-05-16",
     forecast_end: str | pd.Timestamp = "2025-11-16",
-    years: int = 2,
+    days: int = 365*2,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     cutoff = pd.Timestamp(cutoff)
     forecast_end = pd.Timestamp(forecast_end)
-    train_start = cutoff - pd.DateOffset(years=years)
+    train_start = cutoff - pd.DateOffset(days=days)
 
     train = df[
         (df["Start_Time"] >= train_start) & (df["Start_Time"] <= cutoff)
@@ -214,7 +225,7 @@ def run_pipeline(
     table: str = DEFAULT_TABLE,
     cutoff: str = "2025-05-16",
     forecast_end: str = "2025-11-16",
-    train_years: int = 2,
+    train_days: int = 365*2,
 ) -> dict:
 
     """Full 2Y pipeline: load → features → split → fit → recursive forecast → eval_df_2Y."""
@@ -231,12 +242,12 @@ def run_pipeline(
         "random_state": 42,
     }
 
-    df_daily, df_model = load_and_prepare_daily(db_path, table)
+    df_daily, df_model = load_and_prepare_daily(db_path, table, cutoff, forecast_end, train_days)
     train_2y, test_actual_2y = split_train_test(
         df_model,
         cutoff=cutoff,
         forecast_end=forecast_end,
-        years=train_years,
+        days=train_days,
     )
 
     ## Dhruv => Starting MLflow run here
@@ -244,7 +255,7 @@ def run_pipeline(
 
         ## Dhruv => Logging the parameters and config
         mlflow.log_params(lgbm_params)
-        mlflow.log_param("train_years", train_years)
+        mlflow.log_param("train_days", train_days)
         mlflow.log_param("cutoff_date", cutoff)
 
         lgbm_model_2y = fit_lgbm_2y(train_2y, lgbm_params)
@@ -276,12 +287,16 @@ def run_pipeline(
     }
 
 
-def main() -> None:
+def main(
+        cutoff: str = "2025-05-16",
+        forecast_end: str = "2025-11-16",
+        train_days: int = 365*2
+) -> None:
     project_dir = Path(__file__).resolve().parent
     db_path = project_dir / DEFAULT_DB_PATH
     out_path = project_dir / "eval_df_2Y.csv"
 
-    results = run_pipeline(db_path=db_path)
+    results = run_pipeline(db_path=db_path, cutoff=cutoff, forecast_end=forecast_end, train_days=train_days)
     results["eval_df_2Y"].to_csv(out_path, index=False)
     print(f"Saved eval_df_2Y to {out_path}")
 
