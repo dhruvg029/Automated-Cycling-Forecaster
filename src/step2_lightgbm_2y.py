@@ -1,7 +1,7 @@
 """
-LightGBM recursive forecast pipeline (2-year training window).
+LightGBM recursive forecast pipeline (1-year training window).
 
-Ported from step2_LightGBM.ipynb — 2Y path only (train_2Y → lgbm_model_2Y → eval_df_2Y).
+Ported from step2_LightGBM.ipynb — 1Y path only (train → lgbm_model → eval_df).
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+import holidays
 
 ## Dhruv => Added MLflow imports
 import mlflow
@@ -21,17 +22,14 @@ import mlflow.lightgbm
 FEATURES = [
     "Site_ID",
     "dayofweek",
-    "month",
-    "dayofyear",
     "is_weekend",
     "month_sin",
     "month_cos",
-    "doy_sin",
-    "doy_cos",
+    "Is_Public_Holiday",
     "lag_1",
-    "lag_7",
-    "lag_14",
-    "lag_28",
+    "lag_2",
+    "lag_3",
+    "lag_7"
 ]
 TARGET = "Count"
 DEFAULT_DB_PATH = "fietstellingen.db"
@@ -41,20 +39,30 @@ DEFAULT_TABLE = "traffic_counts"
 def load_raw_data(
     db_path: str | Path = DEFAULT_DB_PATH,
     table: str = DEFAULT_TABLE,
-    cutoff: str | pd.Timestamp = "2025-05-16",
-    forecast_end: str | pd.Timestamp = "2025-11-16",
+    cutoff: str | pd.Timestamp = "2026-03-31",
+    forecast_end: str | pd.Timestamp = "2026-04-30",
     days: int = 365*2,
 ) -> pd.DataFrame:
     """Load cycling counts from SQLite (step2_LightGBM.ipynb)."""
 
-    start_time = (pd.Timestamp(cutoff) - pd.Timedelta(days=days)).strftime("%Y-%m-%d") + " 00:00:00"
+    max_lag = 7
+    start_time = (pd.Timestamp(cutoff) - pd.Timedelta(days=days + max_lag)).strftime("%Y-%m-%d") + " 00:00:00"
     end_time = pd.Timestamp(forecast_end).strftime("%Y-%m-%d") + " 23:59:59"
 
     query = f"""
-    SELECT *
+    SELECT 
+        Site_ID,
+        strftime('%Y-%m-%d %H:00:00', Start_Time) AS Start_Time,
+        SUM(Count) AS Count 
     FROM "{table}"
     WHERE Start_Time >= "{start_time}"
-    AND End_Time <= "{end_time}";
+    AND Start_Time <= "{end_time}"
+    GROUP BY
+        Site_ID,
+        strftime('%Y-%m-%d %H:00:00', Start_Time)
+    ORDER BY
+        Site_ID,
+        Start_Time;
     """
 
     print(f"query: {query}")
@@ -65,51 +73,62 @@ def load_raw_data(
 def load_and_prepare_daily(
     db_path: str | Path = DEFAULT_DB_PATH,
     table: str = DEFAULT_TABLE,
-    cutoff: str | pd.Timestamp = "2025-05-16",
-    forecast_end: str | pd.Timestamp = "2025-11-16",
+    cutoff: str | pd.Timestamp = "2026-03-31",
+    forecast_end: str | pd.Timestamp = "2026-04-30",
     days: int = 365*2,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     """Load raw counts, aggregate to daily per site, add features and lags."""
-    
-    df = load_raw_data(db_path, table, cutoff, forecast_end, days)
-    df["Start_Time"] = pd.to_datetime(df["Start_Time"])
-    df["End_Time"] = pd.to_datetime(df["End_Time"])
+
+    df_h = load_raw_data(db_path, table, cutoff, forecast_end, days)
+    df_h["Start_Time"] = pd.to_datetime(df_h["Start_Time"])
 
     df_daily = (
-        df.dropna(subset=["Count"])
+        df_h.dropna(subset=["Count"])
         .set_index("Start_Time")
         .groupby("Site_ID")
         .resample("D")
         .agg({"Count": "sum"})
         .reset_index()
     )
-    df_daily = add_time_features(df_daily)
+    
+    df_daily["Start_Time"] = pd.to_datetime(df_daily["Start_Time"])
 
-    for lag in (1, 7, 14, 28):
+    df_daily = add_time_features(df_daily)
+    df_daily = add_holiday_feature(df_daily)
+
+    for lag in (1, 2, 3, 7):
         df_daily[f"lag_{lag}"] = df_daily.groupby("Site_ID")["Count"].shift(lag)
 
     df_model = df_daily.dropna().copy()
+
+
     return df_daily, df_model
 
 
 def add_time_features(data: pd.DataFrame) -> pd.DataFrame:
     data = data.copy()
     data["dayofweek"] = data["Start_Time"].dt.dayofweek
-    data["month"] = data["Start_Time"].dt.month
-    data["dayofyear"] = data["Start_Time"].dt.dayofyear
     data["is_weekend"] = (data["dayofweek"] >= 5).astype(int)
+    data["month"] = data["Start_Time"].dt.month
     data["month_sin"] = np.sin(2 * np.pi * data["month"] / 12)
     data["month_cos"] = np.cos(2 * np.pi * data["month"] / 12)
-    data["doy_sin"] = np.sin(2 * np.pi * data["dayofyear"] / 365)
-    data["doy_cos"] = np.cos(2 * np.pi * data["dayofyear"] / 365)
     return data
+
+def add_holiday_feature(df: pd.DataFrame) -> pd.DataFrame:
+    ## Initialize the Belgian holiday calendar for your dataset's years
+    years_in_data = df['Start_Time'].dt.year.unique().tolist()
+    be_holidays = holidays.BE(years=years_in_data)
+    ## Create a binary flag: 1 if it's a holiday, 0 if it's a normal day
+    ## We convert Start_Time to just the date to match the holiday dictionary
+    df['Is_Public_Holiday'] = df['Start_Time'].dt.date.apply(lambda x: 1 if x in be_holidays else 0)
+    return df
 
 
 def split_train_test(
     df: pd.DataFrame,
-    cutoff: str | pd.Timestamp = "2025-05-16",
-    forecast_end: str | pd.Timestamp = "2025-11-16",
+    cutoff: str | pd.Timestamp = "2026-03-31",
+    forecast_end: str | pd.Timestamp = "2026-04-30",
     days: int = 365*2,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     cutoff = pd.Timestamp(cutoff)
@@ -125,16 +144,16 @@ def split_train_test(
     return train, test_actual
 
 ## Dhruv => added model_params argument for MLFlow
-def fit_lgbm_2y(train_2y: pd.DataFrame, model_params: dict) -> LGBMRegressor:
-    train_2y = train_2y.copy()
-    train_2y["Site_ID"] = train_2y["Site_ID"].astype("category")
+def fit_lgbm(train: pd.DataFrame, model_params: dict) -> LGBMRegressor:
+    train = train.copy()
+    train["Site_ID"] = train["Site_ID"].astype("category")
 
     ## Dhruv => Model parameters defined here
     model = LGBMRegressor(**model_params)
 
     model.fit(
-        train_2y[FEATURES],
-        train_2y[TARGET],
+        train[FEATURES],
+        train[TARGET],
         categorical_feature=["Site_ID"],
     )
     return model
@@ -153,8 +172,9 @@ def recursive_forecast_lgbm(
     for date in future_dates:
         future_rows = pd.DataFrame({"Site_ID": sites, "Start_Time": date})
         future_rows = add_time_features(future_rows)
+        future_rows = add_holiday_feature(future_rows)
 
-        for lag in (1, 7, 14, 28):
+        for lag in (1, 2, 3, 7):
             lag_values = (
                 history[history["Start_Time"] == date - pd.Timedelta(days=lag)][
                     ["Site_ID", "Count"]
@@ -163,7 +183,7 @@ def recursive_forecast_lgbm(
             future_rows = future_rows.merge(lag_values, on="Site_ID", how="left")
 
         future_rows = future_rows.dropna(
-            subset=["lag_1", "lag_7", "lag_14", "lag_28"]
+            subset=["lag_1", "lag_2", "lag_3", "lag_7"]
         ).copy()
         future_rows["Site_ID"] = future_rows["Site_ID"].astype("category")
         future_rows["pred"] = model.predict(future_rows[features])
@@ -182,8 +202,8 @@ def predict_and_evaluate(
     lgbm_model: LGBMRegressor,
     test_actual: pd.DataFrame,
     df_daily: pd.DataFrame,
-    cutoff: str | pd.Timestamp = "2025-05-16",
-    forecast_end: str | pd.Timestamp = "2025-11-16",
+    cutoff: str | pd.Timestamp = "2026-03-31",
+    forecast_end: str | pd.Timestamp = "2026-04-30",
     features: list[str] = FEATURES,
 ) -> pd.DataFrame:
     cutoff = pd.Timestamp(cutoff)
@@ -223,12 +243,12 @@ def predict_and_evaluate(
 def run_pipeline(
     db_path: str | Path = DEFAULT_DB_PATH,
     table: str = DEFAULT_TABLE,
-    cutoff: str = "2025-05-16",
-    forecast_end: str = "2025-11-16",
+    cutoff: str = "2026-03-31",
+    forecast_end: str = "2026-04-30",
     train_days: int = 365*2,
 ) -> dict:
 
-    """Full 2Y pipeline: load → features → split → fit → recursive forecast → eval_df_2Y."""
+    """Full 1Y pipeline: load → features → split → fit → recursive forecast → eval_df."""
 
     ## Dhruv => Setting experiment name
     mlflow.set_experiment("Forecasting Experiment")
@@ -243,12 +263,15 @@ def run_pipeline(
     }
 
     df_daily, df_model = load_and_prepare_daily(db_path, table, cutoff, forecast_end, train_days)
-    train_2y, test_actual_2y = split_train_test(
+    train, test_actual = split_train_test(
         df_model,
         cutoff=cutoff,
         forecast_end=forecast_end,
         days=train_days,
     )
+
+    train = train.sort_values(["Site_ID", "Start_Time"]).reset_index(drop=True)
+    test_actual = test_actual.sort_values(["Site_ID", "Start_Time"]).reset_index(drop=True)
 
     ## Dhruv => Starting MLflow run here
     with mlflow.start_run(run_name = "Dhruv_Testing_1"):
@@ -258,12 +281,12 @@ def run_pipeline(
         mlflow.log_param("train_days", train_days)
         mlflow.log_param("cutoff_date", cutoff)
 
-        lgbm_model_2y = fit_lgbm_2y(train_2y, lgbm_params)
+        lgbm_model = fit_lgbm(train, lgbm_params)
         
         ## Updated here the function
-        eval_df_2y, mae, rmse= predict_and_evaluate(
-            lgbm_model_2y,
-            test_actual_2y,
+        eval_df, mae, rmse= predict_and_evaluate(
+            lgbm_model,
+            test_actual,
             df_daily,
             cutoff = cutoff,
             forecast_end = forecast_end,
@@ -275,30 +298,30 @@ def run_pipeline(
         
         ## Dhruv => Saving the actual model artifact to MLflow
         ## Dhruv => This is what docker will pull later to serve the predictions
-        mlflow.lightgbm.log_model(lgbm_model_2y, "model")
+        mlflow.lightgbm.log_model(lgbm_model, "model")
 
     return {
         "df_daily": df_daily,
         "df_model": df_model,
-        "train_2Y": train_2y,
-        "test_actual_2Y": test_actual_2y,
-        "lgbm_model_2Y": lgbm_model_2y,
-        "eval_df_2Y": eval_df_2y,
+        "train": train,
+        "test_actual": test_actual,
+        "lgbm_model": lgbm_model,
+        "eval_df": eval_df,
     }
 
 
 def main(
-        cutoff: str = "2025-05-16",
-        forecast_end: str = "2025-11-16",
-        train_days: int = 365*2
+        cutoff: str = "2026-03-31",
+        forecast_end: str = "2026-04-30",
+        train_days: int = 365
 ) -> None:
     project_dir = Path(__file__).resolve().parent
     db_path = project_dir / DEFAULT_DB_PATH
-    out_path = project_dir / "eval_df_2Y.csv"
+    out_path = project_dir / "eval_df.csv"
 
     results = run_pipeline(db_path=db_path, cutoff=cutoff, forecast_end=forecast_end, train_days=train_days)
-    results["eval_df_2Y"].to_csv(out_path, index=False)
-    print(f"Saved eval_df_2Y to {out_path}")
+    results["eval_df"].to_csv(out_path, index=False)
+    print(f"Saved eval_df to {out_path}")
 
 
 if __name__ == "__main__":
