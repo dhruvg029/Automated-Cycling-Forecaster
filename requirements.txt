@@ -3,3 +3,4 @@ pandas
 lightgbm
 scikit-learn
 mlflow
+holidays
