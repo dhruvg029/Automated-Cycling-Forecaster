@@ -38,6 +38,26 @@ DEFAULT_DB_PATH = "../data/fietstellingen.db"
 DEFAULT_OUT_PATH = "../data/eval_df.csv"
 DEFAULT_TABLE = "traffic_counts"
 
+def get_latest_date_from_db(
+    db_path: str | Path = DEFAULT_DB_PATH,
+    table: str = DEFAULT_TABLE,
+) -> str:
+
+    query = f"""
+    SELECT DATE(MAX(Start_Time)) AS latest_date
+    FROM "{table}";
+    """
+
+    with sqlite3.connect(Path(db_path)) as conn:
+        result = pd.read_sql_query(query, conn)
+
+    latest_date = result.loc[0, "latest_date"]
+
+    if latest_date is None:
+        raise ValueError("No data found in the database.")
+
+    return latest_date
+
 
 def load_raw_data(
     db_path: str | Path = DEFAULT_DB_PATH,
@@ -314,24 +334,37 @@ def run_pipeline(
     }
 
 
-def main() -> None:
-    # parse arguments from CLI
-    parser = ArgumentParser()
-    parser.add_argument("--cutoff", type=str, default="2026-03-31")
-    parser.add_argument("--forecast_end", type=str, default="2026-04-30")
-    parser.add_argument("--train_days", type=int, default=365)
-    args = parser.parse_args()
-
-    print(f"Set params: cutoff={args.cutoff}, forecast_end={args.forecast_end}, train_days={args.train_days}")
-
+def main(
+    cutoff: str | None = None,
+    forecast_end: str | None = None,
+    train_days: int = 365,
+) -> None:
     project_dir = Path(__file__).resolve().parent
     db_path = project_dir / DEFAULT_DB_PATH
     out_path = project_dir / DEFAULT_OUT_PATH
 
-    results = run_pipeline(db_path=db_path, cutoff=args.cutoff, forecast_end=args.forecast_end, train_days=args.train_days)
+    if forecast_end is None:
+        forecast_end = get_latest_date_from_db(db_path=db_path)
+
+    if cutoff is None:
+        cutoff = (pd.Timestamp(forecast_end) - pd.DateOffset(months=1)).strftime("%Y-%m-%d")
+
+    print(f"Cutoff used: {cutoff}")
+    print(f"Forecast_end used: {forecast_end}")
+
+    results = run_pipeline(db_path=db_path, cutoff=cutoff, forecast_end=forecast_end, train_days=train_days)
     results["eval_df"].to_csv(out_path, index=False)
     print(f"Saved eval_df to {out_path}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = ArgumentParser()
+    parser.add_argument("--cutoff", type=str, default=None)
+    parser.add_argument("--forecast_end", type=str, default=None)
+    parser.add_argument("--train_days", type=int, default=365)
+    args = parser.parse_args()
+    main(
+        cutoff=args.cutoff,
+        forecast_end=args.forecast_end,
+        train_days=args.train_days,
+    )

@@ -1,0 +1,15 @@
+# Airflow local files
+airflow_home/
+
+# MLflow local artifacts
+mlartifacts/
+mlruns/
+
+# Local files
+.DS_Store
+*.db
+*.csv
+
+# Python cache
+__pycache__/
+*.pyc
