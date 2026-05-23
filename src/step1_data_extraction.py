@@ -10,7 +10,7 @@ def data_to_sqlite():
     """
     ## Collect the BASE URL
     base_url = "https://opendata.apps.mow.vlaanderen.be/fietstellingen/"
-    db_name = "fietstellingen.db"
+    db_name = "/data/fietstellingen.db"
 
     ## Connect to (or create) the SQLite database
     conn = sqlite3.connect(db_name)
