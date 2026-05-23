@@ -31,7 +31,8 @@ FEATURES = [
     "lag_7"
 ]
 TARGET = "Count"
-DEFAULT_DB_PATH = "fietstellingen.db"
+DEFAULT_DB_PATH = "/data/fietstellingen.db"
+DEFAULT_OUT_PATH = "/data/eval_df.csv"
 DEFAULT_TABLE = "traffic_counts"
 METRICS_DB_PATH = "model_metrics.db"
 
@@ -241,14 +242,29 @@ def run_pipeline(
     train_days: int = 365*2,
 ) -> dict:
     """Full 1Y pipeline: load → features → split → fit → recursive forecast → eval_df."""
-    ## Dhruv => Setting experiment name
-    mlflow.set_experiment("Forecasting Experiment")
-    ## Dhruv => Added model parameters here instead
-    lgbm_params = {"n_estimators": 500, "learning_rate": 0.05, "max_depth": -1, "num_leaves": 31, "random_state": 42}
+
     df_daily, df_model = load_and_prepare_daily(db_path, table, cutoff, forecast_end, train_days)
-    train, test_actual = split_train_test(df_model, cutoff=cutoff, forecast_end=forecast_end, days=train_days)
+    train, test_actual = split_train_test(
+        df_model,
+        cutoff=cutoff,
+        forecast_end=forecast_end,
+        days=train_days,
+    )
+
     train = train.sort_values(["Site_ID", "Start_Time"]).reset_index(drop=True)
     test_actual = test_actual.sort_values(["Site_ID", "Start_Time"]).reset_index(drop=True)
+
+    ## Dhruv => Setting experiment name
+    mlflow.set_tracking_uri("http://mlflow:5000")
+    mlflow.set_experiment("Forecasting Experiment")
+    ## Dhruv => Added model parameters here instead
+    lgbm_params = {
+        "n_estimators": 500,
+        "learning_rate": 0.05,
+        "max_depth": -1,
+        "num_leaves": 31,
+        "random_state": 42,
+    }
 
     ## Dhruv => Starting MLflow run here
     with mlflow.start_run(run_name="Dhruv_Testing_1"):

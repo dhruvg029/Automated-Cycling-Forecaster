@@ -38,7 +38,7 @@ def data_to_sqlite_incremental():
     and appends them to the existing SQLite database.
     """
     base_url = "https://opendata.apps.mow.vlaanderen.be/fietstellingen/"
-    db_name = "fietstellingen.db"
+    db_name = "/data/fietstellingen.db"
     table_name = "traffic_counts"
     col_names = ["Site_ID", "Direction", "Modus", "Start_Time", "End_Time", "Count"]
 

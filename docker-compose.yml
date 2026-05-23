@@ -1,0 +1,37 @@
+services:
+  data-collector:
+    image: mda-new
+    volumes:
+      - mda:/data
+    command: python app/src/step1_data_extraction.py
+  
+  mlflow:
+    image: ghcr.io/mlflow/mlflow
+    container_name: mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - mda:/data
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --allowed-hosts "*"
+      --cors-allowed-origins "*"
+      --backend-store-uri sqlite:////data/mlflow.db
+      --default-artifact-root /data/mlartifacts 
+
+  model-calibrator:
+    image: mda-new
+    depends_on:
+      - mlflow
+    volumes:
+      - mda:/data
+    command: python app/src/step2_lightgbm_2y.py
+
+volumes:
+  mda:
+
+networks:
+  default:
+    name: mda-net
