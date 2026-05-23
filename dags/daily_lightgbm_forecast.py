@@ -56,7 +56,7 @@ with DAG(
     run_lightgbm_pipeline = DockerOperator(
         task_id="run_lightgbm_pipeline",
         image="mda-cycling",
-        command="python app/src/step2_lightgbm_2y.py --train_days 30",
+        command="python app/src/step2_lightgbm_2y.py",
         docker_url="unix://var/run/docker.sock",
         network_mode="mda-net",
         auto_remove=True,
