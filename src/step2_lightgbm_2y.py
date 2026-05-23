@@ -36,7 +36,7 @@ TARGET = "Count"
 DEFAULT_DB_PATH = "/data/fietstellingen.db"
 DEFAULT_OUT_PATH = "/data/eval_df.csv"
 DEFAULT_TABLE = "traffic_counts"
-METRICS_DB_PATH = "model_metrics.db"
+METRICS_DB_PATH = "/data/model_metrics.db"
 
 def get_latest_date_from_db(
     db_path: str | Path = DEFAULT_DB_PATH,
@@ -289,7 +289,7 @@ def run_pipeline(
         mlflow.lightgbm.log_model(lgbm_model, "model")
 
         ## Manasvi: Log to SQLite for Streamlit
-        save_metrics_to_db(mae, rmse, eval_df, db_path)
+        save_metrics_to_db(mae, rmse, eval_df)
 
 
         return {
