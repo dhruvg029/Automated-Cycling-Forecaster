@@ -45,6 +45,18 @@ services:
       - airflow-init
     command: airflow scheduler
 
+  business-api:
+    image: mda-cycling
+    working_dir: /app
+    command: python -m uvicorn src.business_api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - mda:/data
+    depends_on:
+      - mlflow
+
+
 volumes:
   mda:
   airflow_home:

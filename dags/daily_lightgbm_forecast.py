@@ -38,7 +38,7 @@ with DAG(
         mount_tmp_dir=False,
         mounts=[
             Mount(
-                source="mda",
+                source="mda-cycling_mda",
                 target="/data",
                 type="volume",
             )
@@ -63,7 +63,7 @@ with DAG(
         mount_tmp_dir=False,
         mounts=[
             Mount(
-                source="mda",
+                source="mda-cycling_mda",
                 target="/data",
                 type="volume",
             )

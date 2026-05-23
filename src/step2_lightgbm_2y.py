@@ -16,6 +16,7 @@ import holidays
 
 import mlflow
 import mlflow.lightgbm
+from mlflow.tracking import MlflowClient
 
 from argparse import ArgumentParser
 
@@ -36,6 +37,9 @@ DEFAULT_DB_PATH = "/data/fietstellingen.db"
 DEFAULT_OUT_PATH = "/data/eval_df.csv"
 DEFAULT_TABLE = "traffic_counts"
 METRICS_DB_PATH = "model_metrics.db"
+
+MAE_THRESHOLD = 500
+RMSE_THRESHOLD = 500
 
 def get_latest_date_from_db(
     db_path: str | Path = DEFAULT_DB_PATH,
@@ -168,7 +172,8 @@ def recursive_forecast_lgbm(
 ) -> pd.DataFrame:
     history = history.copy()
     predictions = []
-    sites = history["Site_ID"].unique()
+    sites = history["Site_ID"].unique()  
+    
     for date in future_dates:
         future_rows = pd.DataFrame({"Site_ID": sites, "Start_Time": date})
         future_rows = add_time_features(future_rows)
@@ -284,8 +289,24 @@ def run_pipeline(
                 
         ## Saving the actual model artifact to MLflow
         ## This is what docker will pull later to serve the predictions
+        # register model if metrics below thresholds
+        if mae <= MAE_THRESHOLD and rmse <= RMSE_THRESHOLD:
+            model_info = mlflow.lightgbm.log_model(lgbm_model, "model", registered_model_name="forecaster")
+            print(f"Model registered: mae={mae:.2f}, MAE_THRESHOLD={MAE_THRESHOLD}, rmse={rmse:.2f}, RMSE_THRESHOLD={RMSE_THRESHOLD}")
 
-        mlflow.lightgbm.log_model(lgbm_model, "model")
+            # promote to champion
+            client = MlflowClient()
+            client.set_registered_model_alias(
+            name="forecaster",
+            alias="champion",
+            version=model_info.registered_model_version
+            )
+
+            print(f"Model promoted to champion: version={model_info.registered_model_version}")
+
+        else:
+            model_info = mlflow.lightgbm.log_model(lgbm_model, "model")
+            print(f"Model not registered: mae={mae:.2f}, MAE_THRESHOLD={MAE_THRESHOLD}, rmse={rmse:.2f}, RMSE_THRESHOLD={RMSE_THRESHOLD}")
 
         ## Manasvi: Log to SQLite for Streamlit
         save_metrics_to_db(mae, rmse, eval_df, db_path)
