@@ -36,7 +36,7 @@ TARGET = "Count"
 DEFAULT_DB_PATH = "/data/fietstellingen.db"
 DEFAULT_OUT_PATH = "/data/eval_df.csv"
 DEFAULT_TABLE = "traffic_counts"
-METRICS_DB_PATH = "model_metrics.db"
+METRICS_DB_PATH = "/data/model_metrics.db"
 
 MAE_THRESHOLD = 500
 RMSE_THRESHOLD = 500
@@ -219,7 +219,7 @@ def predict_and_evaluate(
     ## Added more metrics here for MLflow to track
     return eval_df, mae, rmse
 
-##Manasvi: Save metrics for Streamlit
+##Save metrics for Streamlit
 def save_metrics_to_db(mae: float, rmse: float, eval_df: pd.DataFrame, db_path: str = METRICS_DB_PATH):
     """Writes model performance metrics and predictions to a dedicated metrics database."""
     conn = sqlite3.connect(db_path)
@@ -308,8 +308,8 @@ def run_pipeline(
             model_info = mlflow.lightgbm.log_model(lgbm_model, "model")
             print(f"Model not registered: mae={mae:.2f}, MAE_THRESHOLD={MAE_THRESHOLD}, rmse={rmse:.2f}, RMSE_THRESHOLD={RMSE_THRESHOLD}")
 
-        ## Manasvi: Log to SQLite for Streamlit
-        save_metrics_to_db(mae, rmse, eval_df, db_path)
+        ## Log to SQLite for Streamlit
+        save_metrics_to_db(mae, rmse, eval_df)
 
 
         return {

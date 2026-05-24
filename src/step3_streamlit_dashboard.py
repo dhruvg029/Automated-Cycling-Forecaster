@@ -21,7 +21,7 @@ import streamlit as st
 # In[8]:
 
 
-sites_df= pd.read_excel('/data/sites.xlsx')
+sites_df= pd.read_excel('app/src/sites.xlsx')     
 
 
 # In[9]:
@@ -137,7 +137,7 @@ def get_latest_model_from_experiment(experiment_id: str) -> str:
     return f"runs:/{latest_run_id}/lgbm_model"
 
 def generate_forecast_from_experiment(
-    tracking_uri: str = "http://13.222.164.59:5000",
+    tracking_uri: str = "http://mlflow:5000",
     experiment_id: str = "2",
     db_path: str = DEFAULT_DB_PATH,
     table: str = DEFAULT_TABLE,
@@ -146,10 +146,13 @@ def generate_forecast_from_experiment(
 ):
     mlflow.set_tracking_uri(tracking_uri)
 
-    model_uri = get_latest_model_from_experiment(experiment_id)
+    # model_uri = get_latest_model_from_experiment(experiment_id)
 
-    print(f"Loading model artifacts from {model_uri}")
-    lgbm_model = mlflow.lightgbm.load_model(model_uri)
+    # print(f"Loading model artifacts from {model_uri}")
+    # lgbm_model = mlflow.lightgbm.load_model(model_uri)
+
+    # change to load model by champion tag
+    lgbm_model = mlflow.pyfunc.load_model("models:/forecaster@champion")
 
     latest_historical_date = get_latest_date_from_db(db_path=db_path, table=table)
     cutoff = pd.Timestamp(latest_historical_date)
@@ -178,7 +181,7 @@ def generate_forecast_from_experiment(
     forecast_output = forecast_output.rename(columns={"Start_Time": "Date", "pred": "predicted_count"})
     forecast_output['Date'] = forecast_output['Date'].dt.strftime('%Y-%m-%d')
     forecast_output['generation_time'] = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
-    forecast_output['model_run_id'] = model_uri.split('/')[1] 
+    # forecast_output['model_run_id'] = model_uri.split('/')[1] 
 
     print(f"Appending new predictions to the 'cycling_predictions' table in {metrics_db}")
     with sqlite3.connect(metrics_db) as conn:
@@ -190,7 +193,7 @@ def generate_forecast_from_experiment(
 if __name__ == "__main__":
     project_dir = Path(__file__).resolve().parent
     generate_forecast_from_experiment(
-        tracking_uri="http://13.222.164.59:5000",
+        tracking_uri="http://mlflow:5000",
         experiment_id="2",
         db_path=project_dir / DEFAULT_DB_PATH,
         metrics_db=project_dir / METRICS_DB_PATH
@@ -199,8 +202,8 @@ if __name__ == "__main__":
 
 # In[31]:
 
-
-forecast_output= pd.read_sql("SELECT * FROM cycling_predictions", conn)
+with sqlite3.connect(METRICS_DB_PATH) as conn:
+    forecast_output= pd.read_sql("SELECT * FROM cycling_predictions", conn)
 
 
 # In[55]:
@@ -226,7 +229,7 @@ full_df.head()
 st.title("Model Monitoring Dashboard")
 st.write("This dashboard automatically checks for new model outputs every 30 minutes.")
 
-DB_PATH = "model_metrics.db"
+DB_PATH = "/data/model_metrics.db"
 
 @st.fragment(run_every="30m")
 def render_dashboard_data():
@@ -307,6 +310,6 @@ def render_dashboard_data():
 
 render_dashboard_data()
 
-st.sidebar.markdown("[Go to MLflow Server](http://13.222.164.59:5000/#/experiments/2/runs)")
-st.sidebar.markdown("[Go to Airflow Server](http://13.222.164.59:8080/home)") 
+st.sidebar.markdown("[Go to MLflow Server](http://mlflow:5000)")
+st.sidebar.markdown("[Go to Airflow Server](http://airflow-server:8080/home)") 
 

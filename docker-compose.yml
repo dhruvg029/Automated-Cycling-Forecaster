@@ -57,6 +57,14 @@ services:
     depends_on:
       - mlflow
 
+  streamlit:
+    image: mda-cycling
+    ports:
+    - "8501:8501"
+    volumes:
+    - mda:/data
+    command: streamlit run app/src/step3_streamlit_dashboard.py --server.address=0.0.0.0 --server.port=8501
+
 
 volumes:
   mda:

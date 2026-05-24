@@ -5,4 +5,9 @@ scikit-learn
 mlflow
 holidays
 streamlit
+openmeteo_requests
+requests_cache
+retry
+openpyxl
 fastapi
+
