@@ -20,13 +20,6 @@ with DAG(
     tags=["forecasting"],
 ) as dag:
 
-    PROJECT = "/Users/rinyoshida/Downloads/KUL/2025_2026/MDA/project/mda-cycling"
-    PYTHON = f"{PROJECT}/.venv/bin/python"
-
-    # PROJECT = "/app"
-    # PYTHON = "/app/.venv/bin/python"
-    # YTHON = "python"
-
     # extract_data = BashOperator(
     #     task_id="extract_data",
     #     bash_command="docker-compose run data-collector",
