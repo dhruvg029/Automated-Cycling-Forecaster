@@ -14,6 +14,9 @@ from lightgbm import LGBMRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import holidays
 
+from argparse import ArgumentParser
+
+## Dhruv => Added MLflow imports
 import mlflow
 import mlflow.lightgbm
 from mlflow.tracking import MlflowClient
@@ -331,10 +334,13 @@ def main(
     out_path = project_dir / DEFAULT_OUT_PATH
 
     if forecast_end is None:
-        forecast_end = get_latest_date_from_db(db_path=db_path)
-
+        forecast_end = (
+            pd.Timestamp(get_latest_date_from_db(db_path=db_path)) - pd.Timedelta(days=2)
+        ).strftime("%Y-%m-%d")  
     if cutoff is None:
-        cutoff = (pd.Timestamp(forecast_end) - pd.DateOffset(months=1)).strftime("%Y-%m-%d")
+        cutoff = (
+            pd.Timestamp(forecast_end) - pd.DateOffset(months=1)
+        ).strftime("%Y-%m-%d")
 
     print(f"Cutoff used: {cutoff}")
     print(f"Forecast_end used: {forecast_end}")

@@ -71,3 +71,6 @@ with DAG(
     )
 
     extract_data >> run_lightgbm_pipeline
+
+    print("step2 upstream:", run_lightgbm_pipeline.upstream_task_ids)
+    print("step1 downstream:", extract_data.downstream_task_ids)
