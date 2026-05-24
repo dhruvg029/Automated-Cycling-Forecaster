@@ -3,6 +3,38 @@ import requests
 import pandas as pd
 from datetime import datetime
 
+## This function ensure the uniqueness of each row in the traffic_counts table. 
+## If the same row is inserted twice, it will be rejected.
+def init_database_constraints(db_name = "fietstellingen.db", table_name = "traffic_counts"):
+    """
+    Ensures the traffic_counts table exists and creates a composite unique index 
+    to guarantee idempotency and prevent duplicate records during daily appends.
+    """
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    
+    ## First, check if the table exists. If not, create it to attach the index.
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            Site_ID TEXT,
+            Direction TEXT,
+            Modus TEXT,
+            Start_Time TEXT,
+            End_Time TEXT,
+            Count INTEGER
+        );
+    """)
+    
+    ## Create the composite unique constraint index
+    cursor.execute(f"""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_prevent_duplicates 
+        ON {table_name} (Site_ID, Start_Time, End_Time, Direction);
+    """)
+    
+    conn.commit()
+    conn.close()
+    print('Unique index is active.')
+
 ## Function to get the latest date from the database
 def get_latest_date(db_name = "fietstellingen.db", table_name = "traffic_counts"):
     """
