@@ -21,7 +21,7 @@ import streamlit as st
 # In[8]:
 
 
-sites_df= pd.read_excel('/data/sites.xlsx')
+sites_df= pd.read_excel('/sites.xlsx')
 
 
 # In[9]:
