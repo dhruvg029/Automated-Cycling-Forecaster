@@ -5,3 +5,4 @@ scikit-learn
 mlflow
 holidays
 streamlit
+fastapi

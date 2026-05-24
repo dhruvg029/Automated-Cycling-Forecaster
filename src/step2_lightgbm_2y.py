@@ -19,6 +19,9 @@ from argparse import ArgumentParser
 ## Dhruv => Added MLflow imports
 import mlflow
 import mlflow.lightgbm
+from mlflow.tracking import MlflowClient
+
+from argparse import ArgumentParser
 
 FEATURES = [
     "Site_ID",
@@ -33,8 +36,8 @@ FEATURES = [
     "lag_7"
 ]
 TARGET = "Count"
-DEFAULT_DB_PATH = "../data/fietstellingen.db"
-DEFAULT_OUT_PATH = "../data/eval_df.csv"
+DEFAULT_DB_PATH = "/data/fietstellingen.db"
+DEFAULT_OUT_PATH = "/data/eval_df.csv"
 DEFAULT_TABLE = "traffic_counts"
 
 mlflow.set_tracking_uri("file:./mlruns")
@@ -44,6 +47,9 @@ mlflow.set_experiment("lightgbm_forecasting")
 # DEFAULT_DB_PATH = "../data/fietstellingen.db"
 # DEFAULT_OUT_PATH = "../data/eval_df.csv"
 # DEFAULT_TABLE = "traffic_counts"
+
+MAE_THRESHOLD = 500
+RMSE_THRESHOLD = 500
 
 def get_latest_date_from_db(
     db_path: str | Path = DEFAULT_DB_PATH,
@@ -155,7 +161,7 @@ def split_train_test(
     test_actual = df[(df["Start_Time"] > cutoff) & (df["Start_Time"] <= forecast_end)].copy()
     return train, test_actual
 
-## Dhruv => added model_params argument for MLFlow
+## added model_params argument for MLFlow
 def fit_lgbm(train: pd.DataFrame, model_params: dict) -> LGBMRegressor:
     train = train.copy()
     train["Site_ID"] = train["Site_ID"].astype("category")
@@ -176,7 +182,8 @@ def recursive_forecast_lgbm(
 ) -> pd.DataFrame:
     history = history.copy()
     predictions = []
-    sites = history["Site_ID"].unique()
+    sites = history["Site_ID"].unique()  
+    
     for date in future_dates:
         future_rows = pd.DataFrame({"Site_ID": sites, "Start_Time": date})
         future_rows = add_time_features(future_rows)
@@ -219,7 +226,7 @@ def predict_and_evaluate(
     print("Recursive LightGBM MAE:", mae)
     print("Recursive LightGBM RMSE:", rmse)
 
-    ## Dhruv => Added more metrics here for MLflow to track
+    ## Added more metrics here for MLflow to track
     return eval_df, mae, rmse
 
 ##Manasvi: Save metrics for Streamlit
@@ -251,39 +258,65 @@ def run_pipeline(
     train_days: int = 365*2,
 ) -> dict:
     """Full 1Y pipeline: load → features → split → fit → recursive forecast → eval_df."""
-    ## Dhruv => Setting experiment name
-    # mlflow.set_tracking_uri("http://localhost:5000")
-    # mlflow.set_experiment("Forecasting Experiment")
 
-    project_root = Path(__file__).resolve().parent.parent
-    mlflow.set_tracking_uri(project_root / "mlruns")
-    mlflow.set_experiment("Forecasting Experiment")
-    ## Dhruv => Added model parameters here instead
-    lgbm_params = {"n_estimators": 500, "learning_rate": 0.05, "max_depth": -1, "num_leaves": 31, "random_state": 42}
     df_daily, df_model = load_and_prepare_daily(db_path, table, cutoff, forecast_end, train_days)
-    train, test_actual = split_train_test(df_model, cutoff=cutoff, forecast_end=forecast_end, days=train_days)
+    train, test_actual = split_train_test(
+        df_model,
+        cutoff=cutoff,
+        forecast_end=forecast_end,
+        days=train_days,
+    )
+
     train = train.sort_values(["Site_ID", "Start_Time"]).reset_index(drop=True)
     test_actual = test_actual.sort_values(["Site_ID", "Start_Time"]).reset_index(drop=True)
 
-    ## Dhruv => Starting MLflow run here
-    with mlflow.start_run(run_name="Dhruv_Testing_1"):
-        ## Dhruv => Logging the parameters and config
+    ## Setting tracking uri and experiment name
+    mlflow.set_tracking_uri("http://mlflow:5000")
+    mlflow.set_experiment("Forecaster Calibration")
+    ## Added model parameters here instead
+    lgbm_params = {
+        "n_estimators": 500,
+        "learning_rate": 0.05,
+        "max_depth": -1,
+        "num_leaves": 31,
+        "random_state": 42,
+    }
+
+    ## Starting MLflow run here
+    with mlflow.start_run(run_name=f"forecaster_calibration_{forecast_end}"):
+        ## Logging the parameters and config
         mlflow.log_params(lgbm_params)
         mlflow.log_param("train_days", train_days)
         mlflow.log_param("cutoff_date", cutoff)
         lgbm_model = fit_lgbm(train, lgbm_params)
        
-        ## Dhruv => Updated here the function
+        ## Updated here the function
         eval_df, mae, rmse = predict_and_evaluate(lgbm_model, test_actual, df_daily, cutoff, forecast_end, FEATURES)
         
-        ## Dhruv => Logging the final metrics
+        ## Logging the final metrics
         mlflow.log_metric("Mean_Absolute_Error", mae)
         mlflow.log_metric("Root_Mean_Squared_Error", rmse)
                 
-        ## Dhruv => Saving the actual model artifact to MLflow
-        ## Dhruv => This is what docker will pull later to serve the predictions
+        ## Saving the actual model artifact to MLflow
+        ## This is what docker will pull later to serve the predictions
+        # register model if metrics below thresholds
+        if mae <= MAE_THRESHOLD and rmse <= RMSE_THRESHOLD:
+            model_info = mlflow.lightgbm.log_model(lgbm_model, "model", registered_model_name="forecaster")
+            print(f"Model registered: mae={mae:.2f}, MAE_THRESHOLD={MAE_THRESHOLD}, rmse={rmse:.2f}, RMSE_THRESHOLD={RMSE_THRESHOLD}")
 
-        mlflow.lightgbm.log_model(lgbm_model, "model")
+            # promote to champion
+            client = MlflowClient()
+            client.set_registered_model_alias(
+            name="forecaster",
+            alias="champion",
+            version=model_info.registered_model_version
+            )
+
+            print(f"Model promoted to champion: version={model_info.registered_model_version}")
+
+        else:
+            model_info = mlflow.lightgbm.log_model(lgbm_model, "model")
+            print(f"Model not registered: mae={mae:.2f}, MAE_THRESHOLD={MAE_THRESHOLD}, rmse={rmse:.2f}, RMSE_THRESHOLD={RMSE_THRESHOLD}")
 
         ## Manasvi: Log to SQLite for Streamlit
         save_metrics_to_db(mae, rmse, eval_df, db_path)

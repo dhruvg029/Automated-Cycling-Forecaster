@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
 from airflow import DAG
-from airflow.providers.standard.operators.bash import BashOperator
+# from airflow.providers.standard.operators.bash import BashOperator
+from airflow.operators.bash import BashOperator
+from airflow.providers.docker.operators.docker import DockerOperator
+from docker.types import Mount
 
 default_args = {
     "owner": "rin",
@@ -17,25 +20,54 @@ with DAG(
     tags=["forecasting"],
 ) as dag:
 
-    PROJECT = "/Users/rinyoshida/Downloads/KUL/2025_2026/MDA/project/mda-cycling"
-    PYTHON = f"{PROJECT}/.venv/bin/python"
+    # extract_data = BashOperator(
+    #     task_id="extract_data",
+    #     bash_command="docker-compose run data-collector",
+    #     # bash_command="python src/step1_data_extraction.py",
+    #     # cwd="/Users/rinyoshida/Downloads/KUL/2025_2026/MDA/project/mda-cycling",
+    #     # cwd="/app"
+    # )
 
-    # PROJECT = "/app"
-    # PYTHON = "/app/.venv/bin/python"
-    # YTHON = "python"
-
-    extract_data = BashOperator(
+    extract_data = DockerOperator(
         task_id="extract_data",
-        bash_command=f"{PYTHON} src/step1_data_extraction.py",
-        cwd="/Users/rinyoshida/Downloads/KUL/2025_2026/MDA/project/mda-cycling",
-        # cwd="/app"
+        image="mda-cycling",
+        command="python app/src/step1_data_extraction.py",
+        docker_url="unix://var/run/docker.sock",
+        network_mode="mda-net",
+        auto_remove=True,
+        mount_tmp_dir=False,
+        mounts=[
+            Mount(
+                source="mda-cycling_mda",
+                target="/data",
+                type="volume",
+            )
+        ],
     )
 
-    run_lightgbm_pipeline = BashOperator(
+    # run_lightgbm_pipeline = BashOperator(
+    #     task_id="run_lightgbm_pipeline",
+    #     bash_command="docker-compose run model-calibrator",
+    #     # bash_command="python src/step2_lightgbm_2y.py",
+    #     # cwd="/Users/rinyoshida/Downloads/KUL/2025_2026/MDA/project/mda-cycling",
+    #     # cwd="/app"
+    # )
+
+    run_lightgbm_pipeline = DockerOperator(
         task_id="run_lightgbm_pipeline",
-        bash_command=f"{PYTHON} src/step2_lightgbm_2y.py",
-        cwd="/Users/rinyoshida/Downloads/KUL/2025_2026/MDA/project/mda-cycling",
-        # cwd="/app"
+        image="mda-cycling",
+        command="python app/src/step2_lightgbm_2y.py",
+        docker_url="unix://var/run/docker.sock",
+        network_mode="mda-net",
+        auto_remove=True,
+        mount_tmp_dir=False,
+        mounts=[
+            Mount(
+                source="mda-cycling_mda",
+                target="/data",
+                type="volume",
+            )
+        ],
     )
 
     extract_data >> run_lightgbm_pipeline
