@@ -5,15 +5,15 @@ from datetime import datetime
 
 ## This function ensure the uniqueness of each row in the traffic_counts table. 
 ## If the same row is inserted twice, it will be rejected.
-def init_database_constraints(db_name = "fietstellingen.db", table_name = "traffic_counts"):
+def init_database_constraints(db_name="/data/fietstellingen.db", table_name="traffic_counts"):
     """
-    Ensures the traffic_counts table exists and creates a composite unique index 
-    to guarantee idempotency and prevent duplicate records during daily appends.
+    Ensures the traffic_counts table exists and applies a composite unique index.
+    If duplicates already exist, it clears them out first so the index can activate.
     """
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
     
-    ## First, check if the table exists. If not, create it to attach the index.
+    ## Create the table structure if it's missing
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
             Site_ID TEXT,
@@ -24,8 +24,21 @@ def init_database_constraints(db_name = "fietstellingen.db", table_name = "traff
             Count INTEGER
         );
     """)
+    conn.commit()
     
-    ## Create the composite unique constraint index
+    ## Deduplicate existing rows to prevent IntegrityErrors
+    ## This cleans up the database if duplicates slipped in before the index was active
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS {table_name}_clean AS 
+        SELECT Site_ID, Direction, Modus, Start_Time, End_Time, MAX(Count) as Count
+        FROM {table_name}
+        GROUP BY Site_ID, Start_Time, End_Time, Direction;
+    """)
+    cursor.execute(f"DROP TABLE {table_name};")
+    cursor.execute(f"ALTER TABLE {table_name}_clean RENAME TO {table_name};")
+    conn.commit()
+    
+    ## Create the composite unique constraint index safely
     cursor.execute(f"""
         CREATE UNIQUE INDEX IF NOT EXISTS idx_prevent_duplicates 
         ON {table_name} (Site_ID, Start_Time, End_Time, Direction);
@@ -33,10 +46,10 @@ def init_database_constraints(db_name = "fietstellingen.db", table_name = "traff
     
     conn.commit()
     conn.close()
-    print('Unique index is active.')
+    print('Unique index is active and database is cleaned.')
 
 ## Function to get the latest date from the database
-def get_latest_date(db_name = "fietstellingen.db", table_name = "traffic_counts"):
+def get_latest_date(db_name="/data/fietstellingen.db", table_name = "traffic_counts"):
     """
     Queries the database to find the most recent Start_Time already ingested.
     If the database or table doesn't exist, returns a baseline start date.
