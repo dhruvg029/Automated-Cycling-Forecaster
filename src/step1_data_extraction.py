@@ -82,9 +82,13 @@ def data_to_sqlite_incremental():
     
     ## Generate dates from the latest date in DB up to today
     dates = pd.date_range(start = start_date, end = datetime.today(), freq = 'D')
-    
-    if len(dates) <= 1 and start_date.strftime('%Y-%m') == datetime.today().strftime('%Y-%m'):
-        print("Database is already completely up to date with the latest available month!")
+
+    ## Extract ONLY the unique months so the loop runs exactly once per CSV file
+    unique_months = dates.strftime('%Y-%m').unique().tolist()
+
+    ## Safe verification exit guard
+    if start_date.date() >= datetime.today().date():
+        print("Database is already completely up to date with today's date!")
         return
 
     conn = sqlite3.connect(db_name)
@@ -96,8 +100,8 @@ def data_to_sqlite_incremental():
     except Exception:
         is_empty = True
 
-    for date in dates:
-        file_name = f"data-{date.strftime('%Y-%m')}.csv"
+    for month_str in unique_months:
+        file_name = f"data-{month_str}.csv"
         file_url = base_url + file_name
 
         response = requests.head(file_url)
@@ -125,6 +129,6 @@ def data_to_sqlite_incremental():
     conn.close()
     print('Data is updated successfully!')
 
-
+## Run the function
 if __name__ == "__main__":
     data_to_sqlite_incremental()
