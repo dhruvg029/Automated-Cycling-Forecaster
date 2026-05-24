@@ -78,7 +78,7 @@ def data_to_sqlite_incremental():
     start_date = get_latest_date(db_name, table_name)
     
     ## Generate dates from the latest date in DB up to today
-    dates = pd.date_range(start = start_date, end = datetime.today(), freq = 'MS')
+    dates = pd.date_range(start = start_date, end = datetime.today(), freq = 'D')
     
     if len(dates) <= 1 and start_date.strftime('%Y-%m') == datetime.today().strftime('%Y-%m'):
         print("Database is already completely up to date with the latest available month!")
