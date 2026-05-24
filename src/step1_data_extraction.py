@@ -74,11 +74,14 @@ def data_to_sqlite_incremental():
     table_name = "traffic_counts"
     col_names = ["Site_ID", "Direction", "Modus", "Start_Time", "End_Time", "Count"]
 
+    ## Ensure the unique index is active before getting the latest date
+    init_database_constraints(db_name, table_name)
+
     ## Determine our start point based on existing data
     start_date = get_latest_date(db_name, table_name)
     
     ## Generate dates from the latest date in DB up to today
-    dates = pd.date_range(start = start_date, end = datetime.today(), freq = 'MS')
+    dates = pd.date_range(start = start_date, end = datetime.today(), freq = 'D')
     
     if len(dates) <= 1 and start_date.strftime('%Y-%m') == datetime.today().strftime('%Y-%m'):
         print("Database is already completely up to date with the latest available month!")
