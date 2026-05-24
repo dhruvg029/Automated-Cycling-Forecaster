@@ -21,7 +21,8 @@ services:
       - airflow_home:/opt/airflow
       - ./dags:/opt/airflow/dags
     command: >
-      bash -c "airflow db migrate &&
+      bash -c "airflow db init &&
+      airflow db migrate &&
       airflow users create -u admin -p admin -f Wingo -l Ng -r Admin -e wingfungwingo.ng@student.kuleuven.be || true"
 
   airflow-server:
