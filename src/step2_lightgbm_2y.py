@@ -39,7 +39,7 @@ TARGET = "Count"
 DEFAULT_DB_PATH = "/data/fietstellingen.db"
 DEFAULT_OUT_PATH = "/data/eval_df.csv"
 DEFAULT_TABLE = "traffic_counts"
-METRICS_DB_PATH = "/data/model_metrics.db"
+METRICS_DB_PATH = "model_metrics.db"
 
 MAE_THRESHOLD = 500
 RMSE_THRESHOLD = 500
@@ -78,19 +78,41 @@ def load_raw_data(
     end_time = pd.Timestamp(forecast_end).strftime("%Y-%m-%d") + " 23:59:59"
 
     query = f"""
-    SELECT 
-        Site_ID,
-        strftime('%Y-%m-%d %H:00:00', Start_Time) AS Start_Time,
-        SUM(Count) AS Count 
-    FROM "{table}"
-    WHERE Start_Time >= "{start_time}"
-    AND Start_Time <= "{end_time}"
-    GROUP BY
-        Site_ID,
-        strftime('%Y-%m-%d %H:00:00', Start_Time)
+    WITH RECURSIVE dates(day) AS (
+        SELECT date("{start_time}")
+        UNION ALL
+        SELECT date(day, '+1 day')
+        FROM dates
+        WHERE day < date("{end_time}")
+    ),
+    sites AS (
+        SELECT DISTINCT Site_ID
+        FROM "{table}"
+    ),
+    daily AS (
+        SELECT
+            Site_ID,
+            date(Start_Time) AS day,
+            SUM(Count) AS Count
+        FROM "{table}"
+        WHERE Start_Time >= "{start_time}"
+        AND Start_Time <= "{end_time}"
+        GROUP BY
+            Site_ID,
+            date(Start_Time)
+    )
+    SELECT
+        s.Site_ID,
+        d.day AS Start_Time,
+        daily.Count
+    FROM sites s
+    CROSS JOIN dates d
+    LEFT JOIN daily
+        ON s.Site_ID = daily.Site_ID
+    AND d.day = daily.day
     ORDER BY
-        Site_ID,
-        Start_Time;
+        s.Site_ID,
+        d.day;
     """
     with sqlite3.connect(Path(db_path)) as conn:
         return pd.read_sql_query(query, conn)
@@ -104,8 +126,8 @@ def load_and_prepare_daily(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load raw counts, aggregate to daily per site, add features and lags."""
 
-    df_h = load_raw_data(db_path, table, cutoff, forecast_end, days)
-    df_h["Start_Time"] = pd.to_datetime(df_h["Start_Time"])
+    df_daily = load_raw_data(db_path, table, cutoff, forecast_end, days)
+    df_daily["Start_Time"] = pd.to_datetime(df_daily["Start_Time"])
 
     df_daily = (
         df_h.dropna(subset=["Count"])
@@ -117,6 +139,7 @@ def load_and_prepare_daily(
     )
     
     df_daily["Start_Time"] = pd.to_datetime(df_daily["Start_Time"])
+    df_daily["Count"] = df_daily.groupby("Site_ID")["Count"].transform(lambda x: x.fillna(x.shift(1).rolling(7, min_periods=1).mean()))
     df_daily = add_time_features(df_daily)
     df_daily = add_holiday_feature(df_daily)
 
@@ -222,7 +245,7 @@ def predict_and_evaluate(
     ## Added more metrics here for MLflow to track
     return eval_df, mae, rmse
 
-##Save metrics for Streamlit
+##Manasvi: Save metrics for Streamlit
 def save_metrics_to_db(mae: float, rmse: float, eval_df: pd.DataFrame, db_path: str = METRICS_DB_PATH):
     """Writes model performance metrics and predictions to a dedicated metrics database."""
     conn = sqlite3.connect(db_path)
@@ -311,8 +334,8 @@ def run_pipeline(
             model_info = mlflow.lightgbm.log_model(lgbm_model, "model")
             print(f"Model not registered: mae={mae:.2f}, MAE_THRESHOLD={MAE_THRESHOLD}, rmse={rmse:.2f}, RMSE_THRESHOLD={RMSE_THRESHOLD}")
 
-        ## Log to SQLite for Streamlit
-        save_metrics_to_db(mae, rmse, eval_df)
+        ## Manasvi: Log to SQLite for Streamlit
+        save_metrics_to_db(mae, rmse, eval_df, db_path)
 
 
         return {
