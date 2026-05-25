@@ -76,6 +76,21 @@ def get_latest_date(db_name="/data/fietstellingen.db", table_name = "traffic_cou
         
     return baseline_date
 
+def insert_ignore(table, conn, keys, data_iter):
+    """
+    Custom insertion method for pandas to_sql that utilizes SQLite's 
+    INSERT OR IGNORE engine strategy to handle duplicate rows gracefully.
+    """
+    cursor = conn.cursor()
+    
+    ## Construct an INSERT OR IGNORE statement dynamically based on columns
+    columns = ", ".join([f'"{k}"' for k in keys])
+    placeholders = ", ".join(["?"] * len(keys))
+    
+    sql = f'INSERT OR IGNORE INTO "{table.name}" ({columns}) VALUES ({placeholders})'
+    
+    cursor.executemany(sql, data_iter)
+
 ## Function to incrementally fetch missing monthly files from the AWV portal
 def data_to_sqlite_incremental():
     """
@@ -127,12 +142,13 @@ def data_to_sqlite_incremental():
                 ## Apply the grammar tags
                 df['Site_ID'] = df['Site_ID'].astype(str).apply(lambda x: f"Location_Tag_{x}")
 
-                ## If the DB was empty, the first file uses 'replace' to initialize. Otherwise, always 'append'.
-                mode = 'replace' if is_empty else 'append'
-                df.to_sql(table_name, conn, if_exists = mode, index = False)
-                
-                ## After the first file is written, the next iterations append
-                is_empty = False
+                if is_empty:
+                    ## If the database is empty on its very first run, insert directly
+                    df.to_sql(table_name, conn, if_exists = 'replace', index = False)
+                    is_empty = False
+                else:
+                    ## Use the custom insert_ignore method to slide past duplicates safely
+                    df.to_sql(table_name, conn, if_exists = 'append', index = False, method = insert_ignore)
 
             except Exception as e:
                 print(f"Error processing {file_name}: {e}")
