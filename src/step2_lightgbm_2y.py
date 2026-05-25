@@ -128,17 +128,6 @@ def load_and_prepare_daily(
 
     df_daily = load_raw_data(db_path, table, cutoff, forecast_end, days)
     df_daily["Start_Time"] = pd.to_datetime(df_daily["Start_Time"])
-
-    df_daily = (
-        df_h.dropna(subset=["Count"])
-        .set_index("Start_Time")
-        .groupby("Site_ID")
-        .resample("D")
-        .agg({"Count": "sum"})
-        .reset_index()
-    )
-    
-    df_daily["Start_Time"] = pd.to_datetime(df_daily["Start_Time"])
     df_daily["Count"] = df_daily.groupby("Site_ID")["Count"].transform(lambda x: x.fillna(x.shift(1).rolling(7, min_periods=1).mean()))
     df_daily = add_time_features(df_daily)
     df_daily = add_holiday_feature(df_daily)
